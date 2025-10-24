@@ -6,6 +6,7 @@ Android Debug Bridge를 통한 디바이스 관리 및 파일 시스템 접근
 import subprocess
 import threading
 import time
+import re
 from typing import List, Dict, Optional, Callable
 import os
 
@@ -77,46 +78,87 @@ class ADBManager:
     def get_file_list(self, path: str = "/") -> List[Dict[str, str]]:
         """지정된 경로의 파일 목록을 가져옴"""
         if not self.current_device:
+            print("❌ 현재 디바이스가 설정되지 않음")
             return []
         
         try:
+            print(f"🔍 ADB 명령어 실행: adb -s {self.current_device} shell ls -la {path}")
             # ls -la 명령어로 상세 정보 가져오기
             result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'ls', '-la', path],
                                   capture_output=True, text=True, timeout=10)
             
+            print(f"📊 ADB 명령어 결과: returncode={result.returncode}")
+            print(f"📝 stdout 길이: {len(result.stdout)}")
+            print(f"⚠️ stderr: {result.stderr}")
+            
             if result.returncode != 0:
+                print(f"❌ ADB 명령어 실패: {result.stderr}")
                 return []
             
             files = []
             lines = result.stdout.strip().split('\n')
+            print(f"📋 파싱할 줄 수: {len(lines)}")
             
-            for line in lines:
+            for i, line in enumerate(lines):
                 if line.strip() and not line.startswith('total'):
-                    parts = line.split()
-                    if len(parts) >= 9:
-                        # ls -la 출력 파싱
-                        permissions = parts[0]
-                        size = parts[4]
-                        date = ' '.join(parts[5:8])
-                        name = ' '.join(parts[8:])
+                    print(f"🔍 파싱 중인 줄 {i}: {line[:50]}...")
+                    
+                    # 정규표현식으로 ls -la 출력 파싱
+                    # 형식: permissions links owner group size month day time name
+                    # 예: drwxr-xr-x  2 user user 4096 Dec 25 10:30 folder_name
+                    # 예: lrwxrwxrwx  1 user user    8 Dec 25 10:30 link_name -> target
+                    
+                    # Android ls -la 출력 형식에 맞는 패턴
+                    # 형식: permissions links owner group size YYYY-MM-DD HH:MM name
+                    # 예: drwxr-xr-x   34 root   root       4096 2025-08-01 15:51 .
+                    pattern = r'^(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(.+)$'
+                    match = re.match(pattern, line)
+                    
+                    if match:
+                        permissions = match.group(1)
+                        links = match.group(2)
+                        owner = match.group(3)
+                        group = match.group(4)
+                        size = match.group(5)
+                        date = match.group(6)
+                        name_part = match.group(7)
+                        
+                        # 심볼릭 링크 처리 (-> 제거)
+                        if ' -> ' in name_part:
+                            name = name_part.split(' -> ')[0].strip()
+                        else:
+                            name = name_part.strip()
+                        
+                        # . 및 .. 디렉토리 제외
+                        if name in ['.', '..']:
+                            continue
                         
                         is_directory = permissions.startswith('d')
+                        is_link = permissions.startswith('l')
                         
                         files.append({
                             'name': name,
                             'path': os.path.join(path, name).replace('//', '/'),
                             'is_directory': is_directory,
+                            'is_link': is_link,
                             'size': size,
                             'permissions': permissions,
-                            'date': date
+                            'date': date,
+                            'owner': owner,
+                            'group': group
                         })
+                        print(f"✅ 파일 추가: {name} ({'폴더' if is_directory else '파일'})")
+                    else:
+                        print(f"⚠️ 파싱 실패: {line}")
             
+            print(f"📁 총 {len(files)}개 파일/폴더 발견")
             return files
             
         except subprocess.TimeoutExpired:
+            print("⏰ ADB 명령어 타임아웃")
             return []
         except Exception as e:
-            print(f"파일 목록 가져오기 실패: {e}")
+            print(f"❌ 파일 목록 가져오기 실패: {e}")
             return []
     
     def pull_file(self, remote_path: str, local_path: str, 
@@ -197,6 +239,52 @@ class ADBManager:
             return result.returncode == 0
         except Exception as e:
             print(f"디렉토리 생성 실패: {e}")
+            return False
+    
+    def rename_file(self, old_path: str, new_path: str) -> bool:
+        """디바이스에서 파일/디렉토리 이름변경"""
+        if not self.current_device:
+            return False
+        
+        try:
+            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'mv', old_path, new_path],
+                                  capture_output=True, text=True, timeout=10)
+            return result.returncode == 0
+        except Exception as e:
+            print(f"파일 이름변경 실패: {e}")
+            return False
+    
+    def get_link_target(self, link_path: str) -> Optional[str]:
+        """심볼릭 링크의 타겟 경로를 가져옴"""
+        if not self.current_device:
+            return None
+        
+        try:
+            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'readlink', link_path],
+                                  capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                target = result.stdout.strip()
+                print(f"🔗 링크 타겟: {link_path} -> {target}")
+                return target
+            else:
+                print(f"❌ 링크 타겟 읽기 실패: {result.stderr}")
+                return None
+        except Exception as e:
+            print(f"❌ 링크 타겟 읽기 오류: {e}")
+            return None
+    
+    def is_directory(self, path: str) -> bool:
+        """경로가 디렉토리인지 확인"""
+        if not self.current_device:
+            return False
+        
+        try:
+            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'test', '-d', path],
+                                  capture_output=True, text=True, timeout=5)
+            return result.returncode == 0
+        except Exception as e:
+            print(f"❌ 디렉토리 확인 오류: {e}")
             return False
     
     def delete_file(self, path: str) -> bool:
