@@ -27,10 +27,9 @@ Android 디바이스의 파일 시스템을 로컬에서 관리할 수 있는 GU
 ```bash
 # 프로젝트 클론
 git clone <repository-url>
-cd adb-fs
-
-# 애플리케이션 실행
-python main.py
+cd adb-fs/adbfs-toga
+chmod +x build.sh
+./build.sh
 ```
 
 ### adb 설정

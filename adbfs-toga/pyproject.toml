@@ -2,7 +2,7 @@
 [tool.briefcase]
 project_name = "adb-fs"
 bundle = "com.explainpark.adbfs"
-version = "0.0.1"
+version = "1.2.0"
 url = "https://github.com/explainpark101/adb-fs"
 license.file = "LICENSE"
 author = "explainpark101"

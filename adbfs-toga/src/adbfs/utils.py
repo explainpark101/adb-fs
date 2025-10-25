@@ -89,7 +89,7 @@ def get_file_type_icon(filename: str) -> str:
     elif get_file_extension(filename) in {'.pdf', '.doc', '.docx'}:
         return "📋"
     else:
-        return "📁"
+        return "📄"
 
 
 def format_timestamp(timestamp: float) -> str:
