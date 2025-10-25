@@ -1,12 +1,13 @@
 [project]
 name = "adb-fs"
-version = "1.0.0"
+version = "1.1.0"
 description = "ADB File System Manager - Android 디바이스 파일 관리 GUI 애플리케이션"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     # tkinter는 Python 표준 라이브러리이므로 별도 설치 불필요
     "pyinstaller>=6.16.0",
+    "briefcase>=0.3.18",
 ]
 keywords = ["adb", "android", "file-manager", "gui", "tkinter"]
 authors = [

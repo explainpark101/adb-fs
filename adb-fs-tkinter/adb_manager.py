@@ -299,3 +299,27 @@ class ADBManager:
         except Exception as e:
             print(f"파일 삭제 실패: {e}")
             return False
+
+    def pair_device(self, ip_address: str, pairing_code: str) -> (bool, str):
+        """ADB 페어링을 시도"""
+        try:
+            # adb pair 명령어 실행
+            process = subprocess.Popen(['adb', 'pair', ip_address],
+                                     stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE,
+                                     text=True)
+            
+            # 페어링 코드 입력
+            stdout, stderr = process.communicate(input=f"{pairing_code}\n", timeout=15)
+            
+            if process.returncode == 0 and "Successfully paired" in stdout:
+                return True, stdout.strip()
+            else:
+                error_message = stderr.strip() if stderr else stdout.strip()
+                return False, error_message
+
+        except subprocess.TimeoutExpired:
+            return False, "페어링 시간이 초과되었습니다."
+        except Exception as e:
+            return False, f"페어링 중 오류 발생: {e}"

@@ -96,6 +96,9 @@ class MainApplication:
         ttk.Button(device_frame, text="새로고침", 
                   command=self.refresh_devices).pack(side=tk.LEFT)
         
+        ttk.Button(device_frame, text="페어링",
+                command=self.pair_device).pack(side=tk.LEFT, padx=(5, 0))
+        
         # 경로 설정
         path_frame = ttk.Frame(control_frame)
         path_frame.pack(fill=tk.X, pady=(5, 0))
@@ -117,7 +120,60 @@ class MainApplication:
         remote_path_entry.pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(remote_path_frame, text="이동", 
                   command=self.navigate_remote_path).pack(side=tk.LEFT)
-    
+
+    def pair_device(self):
+        """ADB 페어링을 위한 다이얼로그 및 로직"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("ADB 페어링")
+        dialog.geometry("400x200")
+
+        main_frame = ttk.Frame(dialog, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # IP 주소 및 포트
+        ip_frame = ttk.Frame(main_frame)
+        ip_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(ip_frame, text="IP 주소:포트", width=15).pack(side=tk.LEFT)
+        ip_entry = ttk.Entry(ip_frame, width=30)
+        ip_entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        # 페어링 코드
+        code_frame = ttk.Frame(main_frame)
+        code_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(code_frame, text="페어링 코드", width=15).pack(side=tk.LEFT)
+        code_entry = ttk.Entry(code_frame, width=30)
+        code_entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        def do_pair():
+            ip_address = ip_entry.get()
+            pairing_code = code_entry.get()
+
+            if not ip_address or not pairing_code:
+                messagebox.showerror("오류", "IP 주소와 페어링 코드를 모두 입력하세요.", parent=dialog)
+                return
+
+            self.log_message(f"페어링 시도: {ip_address}")
+
+            def pair_worker():
+                success, message = self.adb_manager.pair_device(ip_address, pairing_code)
+                
+                def update_ui():
+                    if success:
+                        self.log_message(f"✅ 페어링 성공: {ip_address}")
+                        messagebox.showinfo("성공", f"페어링에 성공했습니다.\n{message}", parent=dialog)
+                        self.refresh_devices()
+                        dialog.destroy()
+                    else:
+                        self.log_message(f"❌ 페어링 실패: {message}")
+                        messagebox.showerror("실패", f"페어링에 실패했습니다.\n{message}", parent=dialog)
+            
+            threading.Thread(target=pair_worker, daemon=True).start()
+
+        # 버튼
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        ttk.Button(button_frame, text="페어링", command=do_pair).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text="취소", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)    
     def setup_split_file_explorer(self, parent):
         """분할 파일 탐색기 영역 설정"""
         explorer_frame = ttk.LabelFrame(parent, text="파일 탐색기", padding=10)
