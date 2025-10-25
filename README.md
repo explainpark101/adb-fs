@@ -26,23 +26,16 @@ Android 디바이스의 파일 시스템을 로컬에서 관리할 수 있는 GU
 
 ```bash
 # 프로젝트 클론
-git clone <repository-url>
+git clone https://github.com/explainpark101/adb-fs.git
 cd adb-fs/adbfs-toga
 chmod +x build.sh
 ./build.sh
 ```
 
-### adb 설정
-
-1. Android SDK Platform Tools 설치
-2. adb를 PATH에 추가
-3. 디바이스에서 USB 디버깅 활성화
-4. 디바이스 연결 후 `adb devices`로 연결 확인
-
 ## 사용 방법
 
 ### 1. 디바이스 연결
-- USB 케이블로 Android 디바이스 연결
+- USB 케이블로 Android 디바이스 연결 또는 pair와 connect를 이용하여 Android 디바이스에 연결
 - 애플리케이션 실행 시 자동으로 디바이스 검색
 - 연결된 디바이스가 목록에 표시됨
 
@@ -73,7 +66,7 @@ adb-fs/
 ## 기술 스택
 
 - **Python 3.9+**: 메인 개발 언어
-- **tkinter**: GUI 프레임워크 (Python 표준 라이브러리)
+- **briefcase**: GUI 프레임워크 
 - **subprocess**: adb 명령어 실행
 - **threading**: 비동기 파일 전송 처리
 
