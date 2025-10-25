@@ -181,7 +181,7 @@ class adbfs(toga.App):
         local_panel.add(toga.Label("Local Files", style=Pack(font_weight=BOLD, text_align=CENTER)))
         
         local_sort_toolbox = toga.Box(style=Pack(direction=ROW, alignment=CENTER, padding_top=5))
-        local_sort_toolbox.add(toga.Label("toolbox 이름으로 정렬:", style=Pack(padding_right=10)))
+        local_sort_toolbox.add(toga.Label("정렬 기준:", style=Pack(padding_right=10)))
         local_sort_buttons = toga.Box(style=Pack(direction=ROW))
         local_sort_buttons.add(toga.Button("Name", on_press=lambda w: self.sort_local_table('name'), style=Pack(flex=1)))
         local_sort_buttons.add(toga.Button("Type", on_press=lambda w: self.sort_local_table('type'), style=Pack(flex=1)))
@@ -207,7 +207,7 @@ class adbfs(toga.App):
         remote_panel.add(toga.Label("Remote Files", style=Pack(font_weight=BOLD, text_align=CENTER)))
 
         remote_sort_toolbox = toga.Box(style=Pack(direction=ROW, alignment=CENTER, padding_top=5))
-        remote_sort_toolbox.add(toga.Label("toolbox 이름으로 정렬:", style=Pack(padding_right=10)))
+        remote_sort_toolbox.add(toga.Label("정렬 기준:", style=Pack(padding_right=10)))
         remote_sort_buttons = toga.Box(style=Pack(direction=ROW))
         remote_sort_buttons.add(toga.Button("Name", on_press=lambda w: self.sort_remote_table('name'), style=Pack(flex=1)))
         remote_sort_buttons.add(toga.Button("Type", on_press=lambda w: self.sort_remote_table('type'), style=Pack(flex=1)))

@@ -7,9 +7,10 @@ import subprocess
 import threading
 import time
 import re
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Tuple
 import os
-
+import shutil
+import sys
 
 class ADBManager:
     """ADB 명령어를 실행하고 디바이스와 상호작용하는 클래스"""
@@ -17,20 +18,40 @@ class ADBManager:
     def __init__(self):
         self.devices = []
         self.current_device = None
+        self.adb_path = self.get_adb_path()
         
+    def get_adb_path(self):
+        """Find the path to the adb executable."""
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        if sys.platform == 'darwin':
+            exe_name = 'adb'
+        elif sys.platform == 'win32':
+            exe_name = 'adb.exe'
+        elif sys.platform.startswith('linux'):
+            exe_name = 'adb'
+        else:
+            return shutil.which('adb')
+
+        path = os.path.join(base_path, exe_name)
+        
+        if os.path.exists(path):
+            os.chmod(path, 0o755)
+            return path
+            
+        # Fallback to PATH
+        return shutil.which('adb')
+
     def check_adb_available(self) -> bool:
         """ADB가 시스템에 설치되어 있는지 확인"""
-        try:
-            result = subprocess.run(['adb', 'version'], 
-                                  capture_output=True, text=True, timeout=5)
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return False
+        return self.adb_path is not None
     
     def get_connected_devices(self) -> List[Dict[str, str]]:
         """연결된 디바이스 목록을 가져옴"""
+        if not self.adb_path:
+            return []
         try:
-            result = subprocess.run(['adb', 'devices'], 
+            result = subprocess.run([self.adb_path, 'devices'], 
                                   capture_output=True, text=True, timeout=10)
             if result.returncode != 0:
                 return []
@@ -59,8 +80,10 @@ class ADBManager:
     
     def _get_device_name(self, device_id: str) -> str:
         """디바이스 이름을 가져옴"""
+        if not self.adb_path:
+            return f"Device {device_id[:8]}"
         try:
-            result = subprocess.run(['adb', '-s', device_id, 'shell', 'getprop', 'ro.product.model'],
+            result = subprocess.run([self.adb_path, '-s', device_id, 'shell', 'getprop', 'ro.product.model'],
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -77,19 +100,14 @@ class ADBManager:
     
     def get_file_list(self, path: str = "/") -> List[Dict[str, str]]:
         """지정된 경로의 파일 목록을 가져옴"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             print("❌ 현재 디바이스가 설정되지 않음")
             return []
         
         try:
             print(f"🔍 ADB 명령어 실행: adb -s {self.current_device} shell ls -la {path}")
-            # ls -la 명령어로 상세 정보 가져오기
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'ls', '-la', path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'ls', '-la', path],
                                   capture_output=True, text=True, timeout=10)
-            
-            print(f"📊 ADB 명령어 결과: returncode={result.returncode}")
-            print(f"📝 stdout 길이: {len(result.stdout)}")
-            print(f"⚠️ stderr: {result.stderr}")
             
             if result.returncode != 0:
                 print(f"❌ ADB 명령어 실패: {result.stderr}")
@@ -97,39 +115,36 @@ class ADBManager:
             
             files = []
             lines = result.stdout.strip().split('\n')
-            print(f"📋 파싱할 줄 수: {len(lines)}")
+
+            patterns = [
+                # With group, YYYY-MM-DD HH:MM
+                re.compile(r'^(?P<permissions>\S+)\s+(?P<links>\d+)\s+(?P<owner>\S+)\s+(?P<group>\S+)\s+(?P<size>\S+)\s+(?P<date>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(?P<name>.+)$'),
+                # With group, Mmm DD HH:MM
+                re.compile(r'^(?P<permissions>\S+)\s+(?P<links>\d+)\s+(?P<owner>\S+)\s+(?P<group>\S+)\s+(?P<size>\S+)\s+(?P<date>\w{3}\s+\d{1,2}\s+\d{2}:\d{2})\s+(?P<name>.+)$'),
+                # With group, Mmm DD YYYY
+                re.compile(r'^(?P<permissions>\S+)\s+(?P<links>\d+)\s+(?P<owner>\S+)\s+(?P<group>\S+)\s+(?P<size>\S+)\s+(?P<date>\w{3}\s+\d{1,2}\s+\d{4})\s+(?P<name>.+)$'),
+                # Without group, YYYY-MM-DD HH:MM
+                re.compile(r'^(?P<permissions>\S+)\s+(?P<links>\d+)\s+(?P<owner>\S+)\s+(?P<size>\S+)\s+(?P<date>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(?P<name>.+)$'),
+            ]
             
             for i, line in enumerate(lines):
                 if line.strip() and not line.startswith('total'):
-                    print(f"🔍 파싱 중인 줄 {i}: {line[:50]}...")
-                    
-                    # 정규표현식으로 ls -la 출력 파싱
-                    # 형식: permissions links owner group size month day time name
-                    # 예: drwxr-xr-x  2 user user 4096 Dec 25 10:30 folder_name
-                    # 예: lrwxrwxrwx  1 user user    8 Dec 25 10:30 link_name -> target
-                    
-                    # Android ls -la 출력 형식에 맞는 패턴
-                    # 형식: permissions links owner group size YYYY-MM-DD HH:MM name
-                    # 예: drwxr-xr-x   34 root   root       4096 2025-08-01 15:51 .
-                    pattern = r'^(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(.+)$'
-                    match = re.match(pattern, line)
+                    match = None
+                    for pattern in patterns:
+                        match = pattern.match(line)
+                        if match:
+                            break
                     
                     if match:
-                        permissions = match.group(1)
-                        links = match.group(2)
-                        owner = match.group(3)
-                        group = match.group(4)
-                        size = match.group(5)
-                        date = match.group(6)
-                        name_part = match.group(7)
+                        data = match.groupdict()
+                        permissions = data['permissions']
+                        name_part = data['name']
                         
-                        # 심볼릭 링크 처리 (-> 제거)
                         if ' -> ' in name_part:
                             name = name_part.split(' -> ')[0].strip()
                         else:
                             name = name_part.strip()
                         
-                        # . 및 .. 디렉토리 제외
                         if name in ['.', '..']:
                             continue
                         
@@ -141,17 +156,15 @@ class ADBManager:
                             'path': os.path.join(path, name).replace('//', '/'),
                             'is_directory': is_directory,
                             'is_link': is_link,
-                            'size': size,
+                            'size': data['size'],
                             'permissions': permissions,
-                            'date': date,
-                            'owner': owner,
-                            'group': group
+                            'date': data['date'],
+                            'owner': data['owner'],
+                            'group': data.get('group', '')
                         })
-                        print(f"✅ 파일 추가: {name} ({'폴더' if is_directory else '파일'})")
                     else:
                         print(f"⚠️ 파싱 실패: {line}")
             
-            print(f"📁 총 {len(files)}개 파일/폴더 발견")
             return files
             
         except subprocess.TimeoutExpired:
@@ -164,12 +177,12 @@ class ADBManager:
     def pull_file(self, remote_path: str, local_path: str, 
                   progress_callback: Optional[Callable[[int, int], None]] = None) -> bool:
         """디바이스에서 로컬로 파일을 다운로드"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
             # Get file size first
-            size_result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'stat', '-c', '%s', remote_path],
+            size_result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'stat', '-c', '%s', remote_path],
                                       capture_output=True, text=True, timeout=5)
             if size_result.returncode != 0:
                 total_size = -1
@@ -178,7 +191,7 @@ class ADBManager:
 
             # Use Popen to capture output in real-time
             process = subprocess.Popen(
-                ['adb', '-s', self.current_device, 'pull', '-p', remote_path, local_path],
+                [self.adb_path, '-s', self.current_device, 'pull', '-p', remote_path, local_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -188,7 +201,7 @@ class ADBManager:
 
             if progress_callback:
                 for line in iter(process.stdout.readline, ''):
-                    match = re.search(r'\[\s*(\d+)%\]', line)
+                    match = re.search(r'[[\s*(\d+)%\\]]', line)
                     if match:
                         percentage = int(match.group(1))
                         if total_size > 0:
@@ -214,7 +227,7 @@ class ADBManager:
     def push_file(self, local_path: str, remote_path: str,
                   progress_callback: Optional[Callable[[int, int], None]] = None) -> bool:
         """로컬에서 디바이스로 파일을 업로드"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
@@ -224,7 +237,7 @@ class ADBManager:
             local_size = os.path.getsize(local_path)
 
             process = subprocess.Popen(
-                ['adb', '-s', self.current_device, 'push', '-p', local_path, remote_path],
+                [self.adb_path, '-s', self.current_device, 'push', '-p', local_path, remote_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -234,7 +247,7 @@ class ADBManager:
 
             if progress_callback:
                 for line in iter(process.stdout.readline, ''):
-                    match = re.search(r'\[\s*(\d+)%\]', line)
+                    match = re.search(r'[[\s*(\d+)%\\]]', line)
                     if match:
                         percentage = int(match.group(1))
                         transferred = int(local_size * percentage / 100)
@@ -256,11 +269,11 @@ class ADBManager:
     
     def create_directory(self, path: str) -> bool:
         """디바이스에 디렉토리 생성"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'mkdir', '-p', path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'mkdir', '-p', path],
                                   capture_output=True, text=True, timeout=10)
             return result.returncode == 0
         except Exception as e:
@@ -269,11 +282,11 @@ class ADBManager:
     
     def rename_file(self, old_path: str, new_path: str) -> bool:
         """디바이스에서 파일/디렉토리 이름변경"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'mv', old_path, new_path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'mv', old_path, new_path],
                                   capture_output=True, text=True, timeout=10)
             return result.returncode == 0
         except Exception as e:
@@ -282,11 +295,11 @@ class ADBManager:
     
     def get_link_target(self, link_path: str) -> Optional[str]:
         """심볼릭 링크의 타겟 경로를 가져옴"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return None
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'readlink', link_path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'readlink', link_path],
                                   capture_output=True, text=True, timeout=5)
             
             if result.returncode == 0:
@@ -302,11 +315,11 @@ class ADBManager:
     
     def is_directory(self, path: str) -> bool:
         """경로가 디렉토리인지 확인"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'test', '-d', path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'test', '-d', path],
                                   capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except Exception as e:
@@ -315,11 +328,11 @@ class ADBManager:
     
     def is_link(self, path: str) -> bool:
         """경로가 심볼릭 링크인지 확인"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'test', '-L', path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'test', '-L', path],
                                   capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except Exception as e:
@@ -328,22 +341,24 @@ class ADBManager:
     
     def delete_file(self, path: str) -> bool:
         """디바이스에서 파일/디렉토리 삭제"""
-        if not self.current_device:
+        if not self.current_device or not self.adb_path:
             return False
         
         try:
-            result = subprocess.run(['adb', '-s', self.current_device, 'shell', 'rm', '-rf', path],
+            result = subprocess.run([self.adb_path, '-s', self.current_device, 'shell', 'rm', '-rf', path],
                                   capture_output=True, text=True, timeout=10)
             return result.returncode == 0
         except Exception as e:
             print(f"파일 삭제 실패: {e}")
             return False
 
-    def pair_device(self, ip_address: str, pairing_code: str) -> (bool, str):
+    def pair_device(self, ip_address: str, pairing_code: str) -> Tuple[bool, str]:
         """ADB 페어링을 시도"""
+        if not self.adb_path:
+            return False, "ADB executable not found."
         try:
             # adb pair 명령어 실행
-            process = subprocess.Popen(['adb', 'pair', ip_address],
+            process = subprocess.Popen([self.adb_path, 'pair', ip_address],
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE,
@@ -363,15 +378,17 @@ class ADBManager:
         except Exception as e:
             return False, f"페어링 중 오류 발생: {e}"
 
-    def restart_server(self) -> (bool, str):
+    def restart_server(self) -> Tuple[bool, str]:
         """Kills and starts the ADB server."""
+        if not self.adb_path:
+            return False, "ADB executable not found."
         try:
             # Kill the server, ignore errors if it's not running
-            subprocess.run(['adb', 'kill-server'], capture_output=True, text=True, timeout=10)
+            subprocess.run([self.adb_path, 'kill-server'], capture_output=True, text=True, timeout=10)
             time.sleep(1) # Give it a moment to die
 
             # Start the server
-            start_result = subprocess.run(['adb', 'start-server'], capture_output=True, text=True, timeout=10)
+            start_result = subprocess.run([self.adb_path, 'start-server'], capture_output=True, text=True, timeout=10)
             
             if start_result.returncode == 0:
                 return True, "ADB server restarted successfully."
@@ -382,10 +399,12 @@ class ADBManager:
         except Exception as e:
             return False, f"An error occurred while restarting ADB server: {e}"
 
-    def connect_device(self, ip_address: str) -> (bool, str):
+    def connect_device(self, ip_address: str) -> Tuple[bool, str]:
         """Connect to a device via IP address."""
+        if not self.adb_path:
+            return False, "ADB executable not found."
         try:
-            result = subprocess.run(['adb', 'connect', ip_address],
+            result = subprocess.run([self.adb_path, 'connect', ip_address],
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and "connected" in result.stdout:
                 return True, result.stdout.strip()
@@ -393,3 +412,30 @@ class ADBManager:
                 return False, result.stderr.strip() if result.stderr else result.stdout.strip()
         except Exception as e:
             return False, str(e)
+
+    def discover_pairing_services(self) -> List[Dict[str, str]]:
+        """Discover ADB pairing services on the network using mDNS."""
+        if not self.adb_path:
+            return []
+        try:
+            result = subprocess.run([self.adb_path, 'mdns', 'services'],
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                return []
+            
+            services = []
+            lines = result.stdout.strip().split('\n')
+            
+            for line in lines:
+                if '_adb-tls-pairing._tcp.' in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        name = parts[0]
+                        address_port = parts[2]
+                        if ':' in address_port:
+                            ip, port = address_port.rsplit(':', 1)
+                            services.append({'name': name, 'ip': ip, 'port': port})
+            return services
+            
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []

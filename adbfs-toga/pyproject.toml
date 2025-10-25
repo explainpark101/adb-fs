@@ -10,9 +10,11 @@ author_email = "explainpark101@gmail.com"
 
 [tool.briefcase.app.adbfs]
 formal_name = "adb-fs"
+icon = "icons/adbfs"
 description = "Connect to Android filesystem using adb"
 long_description = """More details about the app should go here.
 """
+
 sources = [
     "src/adbfs",
 ]
@@ -41,6 +43,7 @@ requires = [
     # older) releases, you can remove this version pin. See beeware/toga#3143.
     "pygobject < 3.52.1",
 ]
+
 
 [tool.briefcase.app.adbfs.linux.system.debian]
 system_requires = [
@@ -192,4 +195,10 @@ requires = [
     "toga-web~=0.5.0",
 ]
 style_framework = "Shoelace v2.3"
+
+[dependency-groups]
+dev = [
+    "pillow>=11.3.0",
+    "requests>=2.32.5",
+]
 
